@@ -1,70 +1,70 @@
 import streamlit as st
-import cv2
-import pytesseract
-import numpy as np
+import requests
 import pandas as pd
 from PIL import Image
 import io
+import json
 
 st.title("Kenya Forest Service Image Table Extractor (Blue Numbers Only)")
 
-uploaded_file = st.file_uploader("Upload table image", type=['png', 'jpg', 'jpeg'])
+# Your OCR.Space API Key here (replace this with your actual key)
+OCR_SPACE_API_KEY = "K888957"
 
-# Function to extract only blue numbers using color mask
-def extract_blue_numbers(image):
-    # Convert image to OpenCV format
-    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-    hsv = cv2.cvtColor(image_cv, cv2.COLOR_BGR2HSV)
+# Function to call OCR.Space API
+def ocr_space_image(file, overlay=False, api_key=OCR_SPACE_API_KEY, language='eng'):
+    payload = {
+        'isOverlayRequired': overlay,
+        'apikey': api_key,
+        'language': language,
+        'OCREngine': 2
+    }
+    files = {'file': file}
+    r = requests.post('https://api.ocr.space/parse/image',
+                      files=files,
+                      data=payload,
+                      )
+    return r.json()
 
-    # Define blue color range (you may adjust these values based on your images)
-    lower_blue = np.array([90, 50, 50])
-    upper_blue = np.array([130, 255, 255])
-    mask = cv2.inRange(hsv, lower_blue, upper_blue)
-    
-    # Apply mask to get blue regions
-    blue_only = cv2.bitwise_and(image_cv, image_cv, mask=mask)
-    
-    # Convert masked image to grayscale for OCR
-    gray = cv2.cvtColor(blue_only, cv2.COLOR_BGR2GRAY)
-    
-    # OCR configuration: digits only
-    config = '--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789'
-    text = pytesseract.image_to_string(gray, config=config)
-    
-    return text
+# File uploader
+uploaded_file = st.file_uploader("Upload table image (JPG, PNG)", type=['jpg', 'jpeg', 'png'])
 
-# Function to parse OCR text into 10x19 table
-def parse_to_table(text):
-    lines = text.split('\n')
-    table = []
-    
-    for line in lines:
-        numbers = [int(num) for num in line.split() if num.isdigit()]
-        if numbers:
-            table.append(numbers)
-
-    # Handle resizing to exactly 10x19 (if OCR output is messy)
-    while len(table) < 10:
-        table.append([])
-    for i in range(10):
-        if len(table[i]) < 19:
-            table[i] += [''] * (19 - len(table[i]))
-        table[i] = table[i][:19]
-    
-    return pd.DataFrame(table, columns=[f'Col {i+1}' for i in range(19)], index=[f'Row {i+1}' for i in range(10)])
-
-# Main logic
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Image", use_column_width=True)
-    
-    st.write("Extracting blue numbers...")
-    extracted_text = extract_blue_numbers(image)
-    st.text(extracted_text)
 
-    table_df = parse_to_table(extracted_text)
-    st.write("Parsed Table:")
-    st.dataframe(table_df)
+    with st.spinner("Extracting text via OCR..."):
+        result = ocr_space_image(uploaded_file)
 
-    csv = table_df.to_csv().encode('utf-8')
-    st.download_button("Download as CSV", data=csv, file_name="extracted_table.csv", mime="text/csv")
+    try:
+        parsed_results = result['ParsedResults'][0]['ParsedText']
+        st.subheader("Raw OCR Extracted Text:")
+        st.text(parsed_results)
+
+        # Now parse the text into table (very basic)
+        rows = parsed_results.split('\n')
+        data = []
+
+        for row in rows:
+            # Extract only numbers
+            numbers = [int(n) for n in row.split() if n.isdigit()]
+            if numbers:
+                data.append(numbers)
+
+        # Make sure data is always 10 rows x 19 columns
+        while len(data) < 10:
+            data.append([])
+        for i in range(10):
+            while len(data[i]) < 19:
+                data[i].append("")
+
+        df = pd.DataFrame(data, columns=[f"Col {i+1}" for i in range(19)])
+        st.subheader("Parsed Table:")
+        st.dataframe(df)
+
+        # Download option
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("Download as CSV", csv, "extracted_table.csv", "text/csv")
+
+    except Exception as e:
+        st.error("OCR failed. Please check your image quality or API key.")
+        st.text(result)
