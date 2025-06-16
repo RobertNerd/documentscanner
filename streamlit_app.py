@@ -1,77 +1,70 @@
 import streamlit as st
-import pdfplumber
-import docx
+import cv2
+import pytesseract
+import numpy as np
 import pandas as pd
-import re
+from PIL import Image
 import io
 
-st.title("Kenya Forest Service Table Extractor")
+st.title("Kenya Forest Service Image Table Extractor (Blue Numbers Only)")
 
-# Allow upload of PDF or DOCX files
-uploaded_file = st.file_uploader("Upload your document (.pdf or .docx)", type=["pdf", "docx"])
+uploaded_file = st.file_uploader("Upload table image", type=['png', 'jpg', 'jpeg'])
 
-# Helper function to extract numbers
-def extract_numbers(text):
-    if text:
-        numbers = re.findall(r'\d+', text)
-        return [int(num) for num in numbers]
-    else:
-        return []
+# Function to extract only blue numbers using color mask
+def extract_blue_numbers(image):
+    # Convert image to OpenCV format
+    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    hsv = cv2.cvtColor(image_cv, cv2.COLOR_BGR2HSV)
 
-# Function to parse DOCX files
-def parse_docx(file):
-    doc = docx.Document(file)
-    data = []
-    for table in doc.tables:
-        for row in table.rows:
-            row_data = []
-            for cell in row.cells:
-                numbers = extract_numbers(cell.text)
-                row_data.append(numbers)
-            data.append(row_data)
-    return data
+    # Define blue color range (you may adjust these values based on your images)
+    lower_blue = np.array([90, 50, 50])
+    upper_blue = np.array([130, 255, 255])
+    mask = cv2.inRange(hsv, lower_blue, upper_blue)
+    
+    # Apply mask to get blue regions
+    blue_only = cv2.bitwise_and(image_cv, image_cv, mask=mask)
+    
+    # Convert masked image to grayscale for OCR
+    gray = cv2.cvtColor(blue_only, cv2.COLOR_BGR2GRAY)
+    
+    # OCR configuration: digits only
+    config = '--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789'
+    text = pytesseract.image_to_string(gray, config=config)
+    
+    return text
 
-# Function to parse PDF files
-def parse_pdf(file):
-    data = []
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                for row in table:
-                    row_data = []
-                    for cell in row:
-                        numbers = extract_numbers(cell)
-                        row_data.append(numbers)
-                    data.append(row_data)
-    return data
+# Function to parse OCR text into 10x19 table
+def parse_to_table(text):
+    lines = text.split('\n')
+    table = []
+    
+    for line in lines:
+        numbers = [int(num) for num in line.split() if num.isdigit()]
+        if numbers:
+            table.append(numbers)
 
+    # Handle resizing to exactly 10x19 (if OCR output is messy)
+    while len(table) < 10:
+        table.append([])
+    for i in range(10):
+        if len(table[i]) < 19:
+            table[i] += [''] * (19 - len(table[i]))
+        table[i] = table[i][:19]
+    
+    return pd.DataFrame(table, columns=[f'Col {i+1}' for i in range(19)], index=[f'Row {i+1}' for i in range(10)])
+
+# Main logic
 if uploaded_file:
-    # Determine file type
-    if uploaded_file.name.endswith('.docx'):
-        data = parse_docx(uploaded_file)
-    elif uploaded_file.name.endswith('.pdf'):
-        file_bytes = io.BytesIO(uploaded_file.read())
-        data = parse_pdf(file_bytes)
-    else:
-        st.error("Unsupported file type.")
-        st.stop()
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Uploaded Image", use_column_width=True)
+    
+    st.write("Extracting blue numbers...")
+    extracted_text = extract_blue_numbers(image)
+    st.text(extracted_text)
 
-    # Flatten data for display
-    flat_data = []
-    for row in data:
-        flat_row = []
-        for cell in row:
-            flat_row.append(",".join(map(str, cell)))
-        flat_data.append(flat_row)
+    table_df = parse_to_table(extracted_text)
+    st.write("Parsed Table:")
+    st.dataframe(table_df)
 
-    # Convert to DataFrame
-    df = pd.DataFrame(flat_data)
-
-    st.write("Extracted Table Data:")
-    st.dataframe(df)
-
-    # CSV download button
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("Download CSV", csv, "extracted_data.csv", "text/csv")
-
+    csv = table_df.to_csv().encode('utf-8')
+    st.download_button("Download as CSV", data=csv, file_name="extracted_table.csv", mime="text/csv")
