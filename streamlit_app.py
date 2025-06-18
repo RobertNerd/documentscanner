@@ -30,7 +30,7 @@ uploaded_file = st.file_uploader("Upload table image (JPG, PNG)", type=['jpg', '
 
 if uploaded_file:
     image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", use_container_width=True
+    st.image(image, caption="Uploaded Image", use_container_width=True)
 
     with st.spinner("Extracting text via OCR..."):
         result = ocr_space_image(uploaded_file)
