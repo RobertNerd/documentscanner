@@ -1,5 +1,1 @@
-streamlit
-requests
-pandas
-numpy
-pillow
+pip install streamlit pillow requests pdf2image python-docx
