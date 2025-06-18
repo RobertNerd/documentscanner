@@ -8,7 +8,7 @@ import json
 st.title("Kenya Forest Service Image Table Extractor (Blue Numbers Only)")
 
 # Your OCR.Space API Key here (replace this with your actual key)
-OCR_SPACE_API_KEY = "3dP8D5BQdEr8Dzgfyr31BuNu118iFNGh2nq3PAWw6JEp"
+OCR_SPACE_API_KEY = "DV95wdwPpmtvkudh3A4GcVkmNocaZUhHxnJempqS2JWT"
 
 # Function to call OCR.Space API
 def ocr_space_image(file, overlay=False, api_key=OCR_SPACE_API_KEY, language='eng'):
